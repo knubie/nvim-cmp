@@ -3,6 +3,10 @@ local str = require('cmp.utils.str')
 local types = require('cmp.types')
 local api = require('cmp.utils.api')
 
+local get_hl = function(row, col)
+  vim.fn.synIDattr(vim.fn.synID(row, col, 1), 'name')
+end
+
 ---@class cmp.GhostTextView
 local ghost_text_view = {}
 
@@ -12,11 +16,15 @@ ghost_text_view.new = function()
   local self = setmetatable({}, { __index = ghost_text_view })
   self.win = nil
   self.entry = nil
+
+  vim.fn.synID(719, 10, 1)
+
   vim.api.nvim_set_decoration_provider(ghost_text_view.ns, {
     on_win = function(_, win)
       return win == self.win
     end,
     on_line = function(_)
+
       local c = config.get().experimental.ghost_text
       if not c then
         return
@@ -28,17 +36,29 @@ ghost_text_view.new = function()
 
       local row, col = unpack(vim.api.nvim_win_get_cursor(0))
       local line = vim.api.nvim_get_current_line()
-      if string.sub(line, col + 1) ~= '' then
-        return
-      end
+      -- if string.sub(line, col + 1) ~= '' then
+      --   return
+      -- end
 
       local text = self.text_gen(self, line, col)
+
       if #text > 0 then
+
+        local virt_text = {
+          { text, { 'CursorLine', c.hl_group or 'Comment' } }
+        }
+
+        -- Merge the stored virtual text into the current.
+        for i = 1, #self.virt_text do
+          virt_text[#virt_text+1] = self.virt_text[i]
+        end
+
         vim.api.nvim_buf_set_extmark(0, ghost_text_view.ns, row - 1, col, {
-          right_gravity = false,
-          virt_text = { { text, c.hl_group or 'Comment' } },
+          virt_text = virt_text,
           virt_text_pos = 'overlay',
-          hl_mode = 'combine',
+          hl_mode = 'replace',
+          right_gravity = false,
+          priority = 0,
           ephemeral = true,
         })
       end
@@ -80,6 +100,26 @@ ghost_text_view.show = function(self, e)
   local changed = e ~= self.entry
   self.win = vim.api.nvim_get_current_win()
   self.entry = e
+
+
+  -- We need to generate and store the virtual text info 
+  -- including highlight data for the current line so that
+  -- we can include it in the virtual text overlay.
+  -- Note: We can't call vim.fn.synID within the on_line callback.
+
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local line = vim.api.nvim_get_current_line()
+
+  self.virt_text = { } 
+
+  for i = col+1, #line do
+    local hl = vim.fn.synIDattr(vim.fn.synID(row, i, 1), 'name')
+    table.insert(self.virt_text, {
+      line:sub(i, i), { 'CursorLine', hl }
+    })
+  end
+
+
   if changed then
     vim.cmd([[redraw!]]) -- force invoke decoration provider.
   end
